@@ -31,6 +31,30 @@ For this sample, the ping publisher should be tested against a local Kafka broke
 - expose the ping topic for producer and consumer verification
 - allow the test to assert that a message was actually published
 
+## Component Architecture
+
+The local component test should reflect the intended runtime shape of the infrastructure slice.
+In this design, the ping publisher runs in the LocalStack-backed environment and publishes to Kafka hosted on an EC2-style instance.
+
+### Architecture Summary
+- LocalStack hosts the AWS-style resources provisioned through CloudFormation
+- the ping publisher runs as the logical component under test
+- Kafka runs on an EC2 instance and exposes the infrastructure ping topic
+- the component test invokes the publisher and then verifies the emitted message on Kafka
+
+### Logical Flow
+1. CloudFormation provisions the LocalStack resources needed by the ping flow
+2. the ping publisher starts with the local environment configuration
+3. the publisher opens a connection to Kafka on the EC2 instance
+4. the publisher emits an infrastructure ping event to the configured topic
+5. a verification consumer reads the message from Kafka and asserts the event contract
+
+### Deployment Boundary
+This keeps the test realistic by separating the AWS-style execution environment from the broker runtime:
+- LocalStack represents the serverless and infrastructure control plane
+- Kafka on an EC2 instance represents the external messaging platform dependency
+- the component test validates the actual integration point between them
+
 ## Proposed Test Scope
 
 The component test should cover the full ping publishing flow for the logical component:
