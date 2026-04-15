@@ -26,49 +26,51 @@ Its responsibility is limited to managing queues and emitting match results for 
 
 ### Core Components
 
-#### 2.1 API Gateway / Ingress
-- Accepts HTTP or gRPC requests from game backends or game servers
-- Validates incoming payloads
-- Translates requests into Kafka events such as join, leave, and update
+#### 2.1 API Gateway
+- Accepts HTTP requests from game backends or game servers
+- Authenticates and validates incoming payloads
+- Routes matchmaking requests to the producer web service
 
-#### 2.1.1 Local Development Environment with LocalStack
-For local development and integration testing, the service should run against a LocalStack environment so engineers can exercise the full event-driven flow without depending on shared cloud infrastructure.
+#### 2.2 MatchMakerProducerWebService (EC2)
+- Receives join, leave, update, and cancel requests from the API Gateway
+- Enriches requests with timestamps and routing metadata
+- Publishes queue lifecycle events into Kafka running on EC2
 
-Recommended local setup:
-- API Gateway / Ingress running locally
-- Matchmaking Service running locally
-- LocalStack providing the local infrastructure boundary for messaging and related AWS-style integrations
-- Optional Redis container for resilience experiments
+#### 2.3 Kafka Cluster (EC2)
+- Serves as the event transport layer between the producer and worker services
+- Stores queue-related events durably for replay and recovery
+- Partitions queue events by the composite key `region + gameMode + skillBracket` so similar candidates are routed together
 
-This keeps the design cloud-friendly while making the MVP easy to develop and validate on a single machine.
-
-#### 2.2 Matchmaking Service
+#### 2.4 MatchMakerConsumerWorker (EC2)
 - Consumes queue events from Kafka
-- Maintains queue state in memory or with optional Redis backing
-- Runs a periodic matchmaking loop
-- Applies rules to determine valid player groups
-- Publishes match creation events
+- Uses Redis as the authoritative source of queue and pool state
+- Maintains the active player pool for each partition key
+- Periodically scans the pool to form matches
+- Widens skill tolerance over time for players who have waited longer
+- Emits `MatchCreated` events back into Kafka for downstream consumers
 
-#### 2.3 Config Service / Static Config
-- Supplies queue and rule configuration
-- Can be file-based (YAML/JSON) for MVP
-- Can later be moved to a DB-backed or dynamic config topic model
+#### 2.5 Redis
+- Acts as the fast, in-memory authoritative queue and matchmaking state store
+- Coordinates multiple consumer workers to avoid duplicate handling
+- Supports queue membership, pool updates, lock/ownership patterns, and match lifecycle state
 
-#### 2.4 Downstream Consumers
+#### 2.6 Downstream Consumers
 These are outside the matchmaking service boundary:
 
 - **Session / Server Allocator**: consumes match-created events and provisions runtime resources
-- **Notification Service**: informs players of match state
+- **Notification Service**: informs players of queue and match state
 - **Analytics Pipeline**: records queue and match metrics
 
 ### Architecture Summary
 
-1. Client-facing systems call the ingress API.
-2. The ingress layer publishes queue events to Kafka.
-3. The matchmaking service consumes those events and updates queue state.
-4. The matchmaker loop evaluates queued players against configured rules.
-5. When a valid match is found, the service emits a match-created event.
-6. Downstream systems react to that event.
+1. Client-facing systems call the API Gateway.
+2. The API Gateway forwards requests to the MatchMakerProducerWebService.
+3. The producer service publishes queue events to Kafka.
+4. MatchMakerConsumerWorker instances consume those events and update Redis.
+5. Redis remains the authoritative source of queue and pool state while Kafka feeds the event stream.
+6. Workers periodically scan Redis-backed pools, widen skill tolerance over time, and form matches.
+7. When a valid match is found, the worker emits a `MatchCreated` event back into Kafka.
+8. Downstream systems react to matchmaking and queue lifecycle events.
 
 ---
 
@@ -83,6 +85,8 @@ Supported event types:
 - `PLAYER_JOIN_QUEUE`
 - `PLAYER_LEAVE_QUEUE`
 - `PLAYER_UPDATE_ATTRIBUTES`
+- `PLAYER_DEQUEUED`
+- `MATCH_CANCELLED`
 
 #### mm.queue.config (optional)
 Used only if queue configuration becomes dynamic at runtime.
@@ -96,6 +100,12 @@ Possible uses:
 
 #### mm.match.created
 Published whenever a valid match is formed.
+
+#### mm.player.dequeued
+Published when a player leaves the queue, disconnects, or cancels matchmaking.
+
+#### mm.match.cancelled
+Published when a previously forming or formed match must be cancelled.
 
 #### mm.match.failed (optional)
 Can be used for timeout, expiry, or terminal failure notifications in later phases.
@@ -116,12 +126,14 @@ Can be used for timeout, expiry, or terminal failure notifications in later phas
     "mmr": 1420,
     "region": "oce",
     "latency": 32,
-    "partySize": 1
+    "partySize": 1,
+    "skillBracket": "1400-1499"
   },
   "metadata": {
     "gameId": "game-xyz",
     "modeId": "mode-duo"
-  }
+  },
+  "partitionKey": "oce:mode-duo:1400-1499"
 }
 ```
 
@@ -199,23 +211,26 @@ type QueueConfig = {
 
 ## 5. Internal Components
 
-### 5.1 Queue Manager
+### 5.1 Redis Queue and Pool Manager
 
 #### Responsibilities
-- Maintain player state per queue
-- Handle add, remove, and update operations
-- Keep queue ordering stable by join time
-- Support efficient lookup by player ID
+- Maintain authoritative player state per queue and partition key in Redis
+- Handle add, remove, update, dequeue, and cancellation operations
+- Keep queue ordering stable by join time while enabling fast worker coordination
+- Support efficient lookup by player ID and pool membership
 
 #### Suggested Structures
-- `Map<queueName, QueueState>` for queues
-- `Map<playerId, PlayerEntry>` for direct player access
-- Ordered list or deque for waiting players
+- Redis sorted sets keyed by `region:gameMode:skillBracket` for waiting players
+- Redis hashes for direct player state access
+- Redis locks or leases for consumer coordination
+- Redis records for in-flight match lifecycle state
 
 #### Event Handling
-- **PLAYER_JOIN_QUEUE** → add player to queue
-- **PLAYER_LEAVE_QUEUE** → remove player from queue
+- **PLAYER_JOIN_QUEUE** → add player to the Redis-backed queue
+- **PLAYER_LEAVE_QUEUE** → remove player from the queue
 - **PLAYER_UPDATE_ATTRIBUTES** → mutate player attributes in place
+- **PLAYER_DEQUEUED** → remove a player because they left, disconnected, or cancelled
+- **MATCH_CANCELLED** → return impacted players to the appropriate state or clear match state
 
 ### 5.2 Rule Engine
 
@@ -250,24 +265,27 @@ type Rule = (
 ### 5.3 Matchmaker Loop
 
 #### Responsibilities
-- Periodically evaluate active queues
-- Select candidate groups within configured size limits
+- Periodically evaluate active Redis-backed pools
+- Select candidate groups within configured size limits for each `region + gameMode + skillBracket` partition
 - Pass groups through the rule engine
+- Widen acceptable skill tolerance over time for long-waiting players
 - Emit events for successful matches
-- Remove matched players from the queue
+- Remove matched players from the authoritative queue state
 
 #### Pseudocode
 ```ts
-for (const queue of queues) {
-  const players = queue.waitingPlayers;
+for (const pool of redisPools) {
+  const players = pool.waitingPlayers;
 
-  while (players.length >= queue.minPlayers) {
-    const candidateGroup = players.slice(0, queue.maxPlayers);
-    const validGroup = ruleEngine.apply(candidateGroup, queue.config, now);
+  while (players.length >= pool.minPlayers) {
+    const expandedTolerance = calculateTolerance(players, now);
+    const candidateGroup = selectCandidates(players, expandedTolerance, pool.maxPlayers);
+    const validGroup = ruleEngine.apply(candidateGroup, pool.config, now);
 
     if (validGroup) {
-      createMatch(validGroup, queue);
-      removeFromQueue(validGroup, queue);
+      persistMatchState(validGroup, pool);
+      emitMatchCreated(validGroup, pool);
+      removeFromQueue(validGroup, pool);
     } else {
       break;
     }
@@ -280,18 +298,19 @@ Typical loop interval can start at 100–500 ms and be tuned based on:
 - queue volume
 - acceptable latency
 - CPU utilization
-- number of active queues
+- number of active partitions
 
 ---
 
 ## 6. Minimal API Surface
 
-Although Kafka is the system backbone, a small ingress API improves adoption and integration.
+Although Kafka is the system backbone, a small API Gateway plus producer web service layer improves adoption and integration.
 
 ### Endpoints
 - `POST /matchmaking/join`
 - `POST /matchmaking/leave`
 - `POST /matchmaking/update`
+- `POST /matchmaking/cancel`
 
 ### Endpoint Responsibilities
 Each endpoint should:
@@ -325,48 +344,56 @@ Each endpoint should:
 
 ### Join Flow
 1. A game backend submits a join request.
-2. The ingress service validates and publishes `PLAYER_JOIN_QUEUE`.
-3. The matchmaking service consumes the event.
-4. The queue manager inserts the player into the target queue.
-5. The matchmaker loop evaluates the queue during the next tick.
-6. If a valid group is found, the service emits `MATCH_CREATED`.
+2. The API Gateway forwards the request to the MatchMakerProducerWebService.
+3. The producer publishes a `PLAYER_JOIN_QUEUE` event to Kafka using the composite partition key.
+4. A MatchMakerConsumerWorker consumes the event and writes the authoritative state to Redis.
+5. The worker evaluates the Redis-backed pool during the next scan.
+6. If a valid group is found, the worker emits `MATCH_CREATED` back into Kafka.
 
-### Leave Flow
-1. A leave request is submitted.
-2. A `PLAYER_LEAVE_QUEUE` event is published.
-3. The queue manager removes the player from the queue if present.
+### Leave / Dequeue Flow
+1. A leave, disconnect, or matchmaking cancel request is submitted.
+2. A `PLAYER_LEAVE_QUEUE` or `PLAYER_DEQUEUED` event is published.
+3. A consumer worker removes the player from Redis if present.
+4. Downstream consumers can react to the dequeue event if needed.
 
 ### Update Flow
 1. A player attribute update is submitted.
 2. A `PLAYER_UPDATE_ATTRIBUTES` event is published.
-3. The queue manager updates the stored entry.
+3. The consumer worker updates the Redis-backed player entry.
 4. The new values are considered in future matching passes.
+
+### Match Cancellation Flow
+1. A match can no longer proceed because players disconnected, left, or a cancellation was triggered.
+2. A `MATCH_CANCELLED` event is published.
+3. The consumer worker updates Redis match state and re-queues players when appropriate.
+4. Downstream systems react to the cancellation event.
 
 ---
 
 ## 8. Non-Functional Considerations
 
 ### Scalability
-- Partition `mm.player.queue` by `queueName` or `playerId`
-- Run multiple service instances in the same consumer group
-- Keep queue ownership deterministic to avoid duplicate matching
+- Partition `mm.player.queue` by the composite key `region + gameMode + skillBracket`
+- Run multiple consumer worker instances in the same consumer group
+- Keep pool ownership deterministic to avoid duplicate matching
 
 ### State Storage
-- Start with in-memory state for simplicity and speed
-- Optionally add Redis for crash recovery and resilience
-- If Redis is used, keep the in-memory copy as the fast working set
+- Use Redis as the authoritative, fast in-memory queue and state store
+- Let consumer workers coordinate through Redis for ownership and consistency
+- Treat Kafka as the durable event feed and replay source rather than the queue-of-record
 
 ### Reliability
 - Use idempotent handling for duplicate queue events
-- Prevent the same player from existing in the same queue more than once
+- Prevent the same player from existing in the same Redis-backed queue more than once
 - Ensure match emission and queue removal are coordinated to avoid duplicate matches
-- Validate the end-to-end join-to-match event flow locally through LocalStack before promoting changes to shared environments
+- Use Redis coordination primitives so multiple workers do not claim the same pool segment
+- Validate the end-to-end join-to-match event flow locally before promoting changes to shared environments
 
 ### Local Development and Testing
-- Use LocalStack as the default local infrastructure dependency for development and integration testing
-- Provision local topics and related resources through startup scripts so the environment is reproducible
-- Run smoke tests against the local stack to verify join, leave, update, and match-created flows
-- Keep application configuration environment-driven so switching between LocalStack and higher environments is low risk
+- Run Kafka and Redis locally through a reproducible container-based setup
+- Provision local topics and Redis structures through startup scripts so the environment is reproducible
+- Run smoke tests locally to verify join, leave, dequeue, cancel, and match-created flows
+- Keep application configuration environment-driven so switching between local and EC2-hosted environments is low risk
 
 ### Observability
 Track at minimum:
@@ -392,16 +419,16 @@ Logs should include:
 ## 9. Deployment and Partitioning Strategy
 
 ### Recommended Initial Model
-- One service deployment
-- One default queue
-- One Kafka consumer group
-- In-memory queue state only
-- One LocalStack-backed local environment for developer setup and CI-friendly integration checks
+- API Gateway in front of the producer web service
+- One MatchMakerProducerWebService deployment on EC2
+- Kafka cluster on EC2
+- One or more MatchMakerConsumerWorker deployments on EC2
+- Redis as the shared authoritative queue/state store
 
 ### Future Horizontal Scaling
 To scale safely:
-- Route all events for a given queue to the same partition or shard owner
-- Ensure one active consumer instance owns a queue partition at a time
+- Route all events for a given `region + gameMode + skillBracket` combination to the same partition or shard owner
+- Ensure one active consumer instance owns a pool segment at a time through Redis coordination
 - Avoid split-brain queue state across instances
 
 This lets the service stay simple while preserving deterministic match decisions.
@@ -413,42 +440,50 @@ This lets the service stay simple while preserving deterministic match decisions
 To ship quickly, the first iteration should include only:
 
 - One input topic: `mm.player.queue`
-- One output topic: `mm.match.created`
-- One queue: `default`
-- One simple rule set: only `minPlayers` and `maxPlayers`
-- In-memory queue manager
-- Simple HTTP join and leave API
+- Output topics for `mm.match.created` and dequeue/cancellation handling
+- One default queue
+- Redis-backed authoritative queue state
+- A producer web service and a consumer worker deployed separately
+- A simple rule set with player-count checks plus time-based skill widening
+- Simple HTTP join, leave, and cancel API support
 
 ### MVP Matching Rule
-For the first version, any first group of players that satisfies:
+For the first version, a candidate group can form a match when it satisfies player-count bounds and stays within the current skill tolerance window:
 
 $$
 minPlayers \leq groupSize \leq maxPlayers
 $$
 
-can form a match.
+and
 
-This keeps the design generic and validates the event-driven architecture before adding complexity.
+$$
+|skill_i - skill_j| \leq tolerance(waitTime)
+$$
+
+where the tolerance expands over time for players who remain in queue longer.
+
+This keeps the design generic while validating the Redis-coordinated, event-driven matchmaking flow.
 
 ---
 
 ## 11. Iteration Plan
 
 ### Phase 1
-- Basic join / leave handling
+- Basic join, leave, and cancel handling
 - Default queue only
-- Match creation based on player count only
-- LocalStack-based developer environment and smoke-test flow
+- Redis-backed authoritative state
+- Match creation based on player count and simple skill-bracket grouping
 
 ### Phase 2
 - Attribute updates
 - MMR and region-based rules
+- Time-based skill tolerance expansion
 - Better queue metrics and dashboards
 
 ### Phase 3
 - Multiple queues and dynamic config
-- Time-based rule relaxation
-- Redis-backed resilience
+- More advanced worker coordination patterns
+- Recovery and replay hardening
 - Optional timeout / failed-match events
 
 ---
@@ -456,19 +491,19 @@ This keeps the design generic and validates the event-driven architecture before
 ## 12. Risks and Open Questions
 
 ### Risks
-- Uneven Kafka partitioning could create hot queues
-- In-memory-only state can be lost during process restarts
-- Overly strict rules may stall match formation
+- Uneven Kafka partitioning could create hot queues for popular region/mode/bracket combinations
+- Redis availability or coordination errors could impact queue ownership and match consistency
+- Overly strict rules may stall match formation before tolerance widening catches up
 - Duplicate events may cause inconsistent queue state if not handled idempotently
 
 ### Open Questions
 - Will party membership be modeled as separate players or a single grouped entity?
 - Should queue ownership be strictly partition-based from day one?
 - How should player expiry and max wait time be surfaced to downstream systems?
-- Is Redis required for the first production release or only after proving load?
+- What Redis coordination pattern should be preferred for lease ownership and recovery?
 
 ---
 
 ## 13. Summary
 
-This design proposes a reusable and generic matchmaking service that is event-driven, rule-configurable, and easy to extend. The MVP intentionally focuses on a narrow feature set so the system can be validated quickly, then expanded with richer rules, multiple queues, and stronger resilience over time.
+This design proposes a reusable, EC2-hosted matchmaking architecture built around an API Gateway, a producer web service, Kafka, Redis, and consumer workers. Redis is the authoritative queue/state layer, Kafka feeds the event stream, and workers continuously scan pools, widen skill tolerance over time, and emit match lifecycle events for downstream systems.
