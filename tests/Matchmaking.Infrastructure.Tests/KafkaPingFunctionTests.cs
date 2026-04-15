@@ -1,4 +1,5 @@
 using Matchmaking.Infrastructure.Ping;
+using Moq;
 using Xunit;
 
 namespace Matchmaking.Infrastructure.Tests;
@@ -8,11 +9,25 @@ public class KafkaPingFunctionTests
     [Fact]
     public async Task HandleAsync_PublishesInfrastructurePingEventToConfiguredTopic()
     {
-        var publisher = new InMemoryKafkaPingPublisher();
-        var clock = new FixedClock(new DateTimeOffset(2026, 4, 15, 5, 0, 0, TimeSpan.Zero));
+        var utcNow = new DateTimeOffset(2026, 4, 15, 5, 0, 0, TimeSpan.Zero);
+        var publisher = new Mock<IPingPublisher>();
+        var clock = new Mock<ISystemClock>();
+        InfraPingMessage? publishedMessage = null;
+        string? publishedTopic = null;
+
+        clock.SetupGet(x => x.UtcNow).Returns(utcNow);
+        publisher
+            .Setup(x => x.PublishAsync(It.IsAny<string>(), It.IsAny<InfraPingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<string, InfraPingMessage, CancellationToken>((topic, message, _) =>
+            {
+                publishedTopic = topic;
+                publishedMessage = message;
+            })
+            .Returns(Task.CompletedTask);
+
         var sut = new KafkaPingFunction(
-            publisher,
-            clock,
+            publisher.Object,
+            clock.Object,
             environmentName: "local",
             topicName: "mm.infrastructure.ping");
 
@@ -20,31 +35,18 @@ public class KafkaPingFunctionTests
 
         Assert.True(result.Success);
         Assert.Equal("mm.infrastructure.ping", result.Topic);
-        Assert.Single(publisher.Messages);
+        Assert.Equal("mm.infrastructure.ping", publishedTopic);
+        Assert.NotNull(publishedMessage);
+        Assert.Equal("INFRA_PING", publishedMessage!.EventType);
+        Assert.Equal(utcNow, publishedMessage.Timestamp);
+        Assert.Equal("lambda-kafka-ping", publishedMessage.Source);
+        Assert.Equal("local", publishedMessage.Environment);
+        Assert.False(string.IsNullOrWhiteSpace(publishedMessage.CorrelationId));
+        Assert.Equal("generic-matchmaking-infra", publishedMessage.Metadata["service"]);
+        Assert.Equal("connectivity-check", publishedMessage.Metadata["purpose"]);
 
-        var message = publisher.Messages[0];
-        Assert.Equal("INFRA_PING", message.EventType);
-        Assert.Equal(clock.UtcNow, message.Timestamp);
-        Assert.Equal("lambda-kafka-ping", message.Source);
-        Assert.Equal("local", message.Environment);
-        Assert.False(string.IsNullOrWhiteSpace(message.CorrelationId));
-        Assert.Equal("generic-matchmaking-infra", message.Metadata["service"]);
-        Assert.Equal("connectivity-check", message.Metadata["purpose"]);
-    }
-
-    private sealed class InMemoryKafkaPingPublisher : IPingPublisher
-    {
-        public List<InfraPingMessage> Messages { get; } = new();
-
-        public Task PublishAsync(string topic, InfraPingMessage message, CancellationToken cancellationToken)
-        {
-            Messages.Add(message);
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class FixedClock(DateTimeOffset utcNow) : ISystemClock
-    {
-        public DateTimeOffset UtcNow { get; } = utcNow;
+        publisher.Verify(
+            x => x.PublishAsync("mm.infrastructure.ping", It.IsAny<InfraPingMessage>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

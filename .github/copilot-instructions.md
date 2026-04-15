@@ -15,5 +15,9 @@
 - Verify with relevant tests before claiming completion.
 - Add short descriptions to public classes, interfaces, and methods.
 - Method descriptions should briefly state the system state at the time they are called.
+- Use dependency injection to assign concrete implementations to interfaces.
+- Prefer constructor injection and keep implementation wiring at the composition root.
+- Use xUnit for C# automated tests.
+- In unit tests, swap interface implementations using mocks.
 - Add component tests when validating a logical component in its intended environment.
 - For local infrastructure flows in this sample, prefer component tests that exercise Kafka together with LocalStack.
