@@ -19,7 +19,7 @@ Parameters:
 
   KafkaBootstrapServers:
     Type: String
-    Default: host.docker.internal:9092
+    Default: localhost:9092
     Description: Kafka bootstrap servers used by the producer.
 
   KafkaTopicName:
@@ -230,3 +230,7 @@ Outputs:
   KafkaTopicParameterName:
     Description: SSM parameter containing the queue topic name.
     Value: !Ref ProducerKafkaTopicParameter
+
+  KafkaBootstrapServers:
+    Description: Bootstrap server address for the local Kafka container.
+    Value: !Ref KafkaBootstrapServers

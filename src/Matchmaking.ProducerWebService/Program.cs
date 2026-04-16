@@ -1,14 +1,34 @@
+using Confluent.Kafka;
 using Matchmaking.Infrastructure.Ping;
 using Matchmaking.ProducerWebService.Matchmaking;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.Configure<KafkaProducerOptions>(builder.Configuration.GetSection("Kafka"));
 builder.Services.AddSingleton<ISystemClock, SystemClock>();
-builder.Services.AddSingleton<IMatchmakingEventPublisher, LoggingMatchmakingEventPublisher>();
-builder.Services.AddSingleton(sp => new MatchmakingRequestHandler(
-    sp.GetRequiredService<IMatchmakingEventPublisher>(),
-    sp.GetRequiredService<ISystemClock>(),
-    builder.Configuration["Kafka:TopicName"] ?? "mm.player.queue"));
+builder.Services.AddSingleton<IProducer<Null, string>>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<KafkaProducerOptions>>().Value;
+
+    return new ProducerBuilder<Null, string>(new ProducerConfig
+    {
+        BootstrapServers = options.BootstrapServers,
+        ClientId = options.ClientId,
+        Acks = Acks.All,
+        EnableIdempotence = true
+    }).Build();
+});
+builder.Services.AddSingleton<IMatchmakingEventPublisher, KafkaMatchmakingEventPublisher>();
+builder.Services.AddSingleton(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<KafkaProducerOptions>>().Value;
+
+    return new MatchmakingRequestHandler(
+        sp.GetRequiredService<IMatchmakingEventPublisher>(),
+        sp.GetRequiredService<ISystemClock>(),
+        options.TopicName);
+});
 
 var app = builder.Build();
 

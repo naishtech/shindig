@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Confluent.Kafka;
 using Xunit;
 
 namespace Matchmaking.Infrastructure.Tests.Component;
@@ -44,9 +46,22 @@ public sealed class ProducerJoinEndpointComponentTests
             return;
         }
 
+        var playerId = $"player-{Guid.NewGuid():N}";
+        const string topicName = "mm.player.queue";
+
+        using var consumer = new ConsumerBuilder<Ignore, string>(new ConsumerConfig
+        {
+            BootstrapServers = "localhost:9092",
+            GroupId = $"producer-component-test-{Guid.NewGuid():N}",
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            EnableAutoCommit = false
+        }).Build();
+
+        consumer.Subscribe(topicName);
+
         var request = new
         {
-            playerId = "player-123",
+            playerId = playerId,
             queueName = "default",
             region = "oce",
             gameMode = "duo",
@@ -66,5 +81,39 @@ public sealed class ProducerJoinEndpointComponentTests
         var response = await client.PostAsJsonAsync("/matchmaking/join", request);
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        var consumedMessage = await ConsumePlayerJoinAsync(consumer, playerId, CancellationToken.None);
+
+        Assert.NotNull(consumedMessage);
+        Assert.Equal("PLAYER_JOIN_QUEUE", consumedMessage!.RootElement.GetProperty("eventType").GetString());
+        Assert.Equal(playerId, consumedMessage.RootElement.GetProperty("playerId").GetString());
+        Assert.Equal("oce:duo:1400-1499", consumedMessage.RootElement.GetProperty("partitionKey").GetString());
+    }
+
+    private static Task<JsonDocument?> ConsumePlayerJoinAsync(IConsumer<Ignore, string> consumer, string expectedPlayerId, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+
+        while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            var consumeResult = consumer.Consume(TimeSpan.FromMilliseconds(500));
+
+            if (consumeResult?.Message?.Value is null)
+            {
+                continue;
+            }
+
+            var document = JsonDocument.Parse(consumeResult.Message.Value);
+
+            if (document.RootElement.TryGetProperty("playerId", out var playerIdProperty) &&
+                string.Equals(playerIdProperty.GetString(), expectedPlayerId, StringComparison.Ordinal))
+            {
+                return Task.FromResult<JsonDocument?>(document);
+            }
+
+            document.Dispose();
+        }
+
+        return Task.FromResult<JsonDocument?>(null);
     }
 }
