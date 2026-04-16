@@ -2,7 +2,7 @@
 
 This folder contains the LocalStack-ready CloudFormation template for the producer web service.
 
-The local deployment flow now also provisions a Kafka-compatible Docker container for local matchmaking traffic before the CloudFormation stack is applied.
+The local deployment flow now also provisions Kafka and Redis Docker containers for local matchmaking traffic and state coordination before the CloudFormation stack is applied.
 
 ## Deploy
 
@@ -13,7 +13,8 @@ pwsh ./scripts/deploy-localstack-producer-web.ps1
 This will:
 - start or reuse the local Kafka container
 - create the matchmaking topic when available
-- deploy the LocalStack CloudFormation stack for the producer web app
+- start or reuse the local Redis container
+- deploy the LocalStack CloudFormation stack for the producer web app and Redis coordination host
 
 You can override the Kafka broker, image, or topic as needed:
 

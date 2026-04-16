@@ -9,6 +9,7 @@ public sealed class MatchmakingRequestHandler
 {
     private readonly IMatchmakingEventPublisher _publisher;
     private readonly ISystemClock _clock;
+    private readonly IPlayerQueueStateStore _stateStore;
     private readonly string _topicName;
 
     /// <summary>
@@ -17,18 +18,27 @@ public sealed class MatchmakingRequestHandler
     public MatchmakingRequestHandler(
         IMatchmakingEventPublisher publisher,
         ISystemClock clock,
+        IPlayerQueueStateStore stateStore,
         string topicName)
     {
         _publisher = publisher;
         _clock = clock;
+        _stateStore = stateStore;
         _topicName = topicName;
     }
 
     /// <summary>
     /// At this point a player has requested to join matchmaking and a queue event is ready to publish.
     /// </summary>
-    public Task QueuePlayerAsync(QueuePlayerRequest request, CancellationToken cancellationToken)
+    public async Task QueuePlayerAsync(QueuePlayerRequest request, CancellationToken cancellationToken)
     {
+        var shouldPublish = await _stateStore.TryQueuePlayerAsync(request, cancellationToken);
+
+        if (!shouldPublish)
+        {
+            return;
+        }
+
         var matchmakingEvent = CreateEvent(
             eventType: "PLAYER_JOIN_QUEUE",
             playerId: request.PlayerId,
@@ -40,14 +50,21 @@ public sealed class MatchmakingRequestHandler
             metadata: request.Metadata,
             reason: null);
 
-        return _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
+        await _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
     }
 
     /// <summary>
     /// At this point a player has requested to leave matchmaking and a leave event is ready to publish.
     /// </summary>
-    public Task LeaveQueueAsync(LeaveQueueRequest request, CancellationToken cancellationToken)
+    public async Task LeaveQueueAsync(LeaveQueueRequest request, CancellationToken cancellationToken)
     {
+        var shouldPublish = await _stateStore.TryRemovePlayerAsync(request.PlayerId, cancellationToken);
+
+        if (!shouldPublish)
+        {
+            return;
+        }
+
         var matchmakingEvent = CreateEvent(
             eventType: "PLAYER_LEAVE_QUEUE",
             playerId: request.PlayerId,
@@ -59,14 +76,21 @@ public sealed class MatchmakingRequestHandler
             metadata: null,
             reason: request.Reason);
 
-        return _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
+        await _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
     }
 
     /// <summary>
     /// At this point a queued player's attributes have changed and an update event is ready to publish.
     /// </summary>
-    public Task UpdatePlayerAsync(UpdatePlayerRequest request, CancellationToken cancellationToken)
+    public async Task UpdatePlayerAsync(UpdatePlayerRequest request, CancellationToken cancellationToken)
     {
+        var shouldPublish = await _stateStore.TryUpdatePlayerAsync(request, cancellationToken);
+
+        if (!shouldPublish)
+        {
+            return;
+        }
+
         var matchmakingEvent = CreateEvent(
             eventType: "PLAYER_UPDATE_ATTRIBUTES",
             playerId: request.PlayerId,
@@ -78,14 +102,21 @@ public sealed class MatchmakingRequestHandler
             metadata: request.Metadata,
             reason: null);
 
-        return _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
+        await _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
     }
 
     /// <summary>
     /// At this point a player has requested to cancel matchmaking and a dequeue event is ready to publish.
     /// </summary>
-    public Task CancelQueueAsync(CancelQueueRequest request, CancellationToken cancellationToken)
+    public async Task CancelQueueAsync(CancelQueueRequest request, CancellationToken cancellationToken)
     {
+        var shouldPublish = await _stateStore.TryRemovePlayerAsync(request.PlayerId, cancellationToken);
+
+        if (!shouldPublish)
+        {
+            return;
+        }
+
         var matchmakingEvent = CreateEvent(
             eventType: "PLAYER_DEQUEUED",
             playerId: request.PlayerId,
@@ -97,7 +128,7 @@ public sealed class MatchmakingRequestHandler
             metadata: null,
             reason: request.Reason);
 
-        return _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
+        await _publisher.PublishAsync(_topicName, matchmakingEvent, cancellationToken);
     }
 
     private MatchmakingEvent CreateEvent(

@@ -27,6 +27,11 @@ Parameters:
     Default: mm.player.queue
     Description: Kafka topic used for queue lifecycle events.
 
+  RedisEndpoint:
+    Type: String
+    Default: localhost:6379
+    Description: Redis endpoint used for authoritative queue and state coordination.
+
   InstanceType:
     Type: String
     Default: t3.small
@@ -111,6 +116,23 @@ Resources:
         - Key: Name
           Value: !Sub ${AppName}-${EnvironmentName}-sg
 
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Ingress rules for the Redis coordination host.
+      VpcId: !Ref ProducerVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-redis-sg
+
   ProducerInstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -178,6 +200,42 @@ Resources:
       Value: !Ref EnvironmentName
       Description: Runtime environment value for the producer web service.
 
+  RedisEndpointParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /shindig/${EnvironmentName}/matchmaker/redis-endpoint
+      Type: String
+      Value: !Ref RedisEndpoint
+      Description: Redis endpoint for matchmaking coordination.
+
+  RedisInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          GroupSet:
+            - !Ref RedisSecurityGroup
+          SubnetId: !Ref ProducerPublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-redis
+        - Key: Workload
+          Value: matchmaking-redis
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          mkdir -p /opt/matchmaker-redis
+          cat >/opt/matchmaker-redis/runtime.env <<EOF
+          REDIS_ENDPOINT=${RedisEndpoint}
+          EOF
+          cat >/opt/matchmaker-redis/README.txt <<EOF
+          Redis coordination host placeholder provisioned by LocalStack CloudFormation.
+          The actual local Redis runtime is provided by the Docker container started by the deployment scripts.
+          EOF
+
   ProducerInstance:
     Type: AWS::EC2::Instance
     Properties:
@@ -204,6 +262,7 @@ Resources:
           ASPNETCORE_URLS=http://0.0.0.0:${AppPort}
           Kafka__BootstrapServers=${KafkaBootstrapServers}
           Kafka__TopicName=${KafkaTopicName}
+          Redis__Endpoint=${RedisEndpoint}
           EOF
           cat >/opt/matchmaker-producer/README.txt <<EOF
           MatchMakerProducerWebService placeholder host provisioned by LocalStack CloudFormation.
@@ -234,3 +293,11 @@ Outputs:
   KafkaBootstrapServers:
     Description: Bootstrap server address for the local Kafka container.
     Value: !Ref KafkaBootstrapServers
+
+  RedisInstanceId:
+    Description: EC2-style instance identifier for the Redis coordination host.
+    Value: !Ref RedisInstance
+
+  RedisEndpoint:
+    Description: Endpoint for the local Redis container used by matchmaking coordination.
+    Value: !Ref RedisEndpoint

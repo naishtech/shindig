@@ -2,11 +2,26 @@ using Confluent.Kafka;
 using Matchmaking.Infrastructure.Ping;
 using Matchmaking.ProducerWebService.Matchmaking;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<KafkaProducerOptions>(builder.Configuration.GetSection("Kafka"));
+builder.Services.Configure<RedisOptions>(builder.Configuration.GetSection("Redis"));
 builder.Services.AddSingleton<ISystemClock, SystemClock>();
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<RedisOptions>>().Value;
+
+    return ConnectionMultiplexer.Connect(new ConfigurationOptions
+    {
+        AbortOnConnectFail = false,
+        ConnectRetry = 2,
+        ConnectTimeout = 2000,
+        SyncTimeout = 2000,
+        EndPoints = { options.Endpoint }
+    });
+});
 builder.Services.AddSingleton<IProducer<Null, string>>(sp =>
 {
     var options = sp.GetRequiredService<IOptions<KafkaProducerOptions>>().Value;
@@ -20,6 +35,7 @@ builder.Services.AddSingleton<IProducer<Null, string>>(sp =>
     }).Build();
 });
 builder.Services.AddSingleton<IMatchmakingEventPublisher, KafkaMatchmakingEventPublisher>();
+builder.Services.AddSingleton<IPlayerQueueStateStore, RedisPlayerQueueStateStore>();
 builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<KafkaProducerOptions>>().Value;
@@ -27,6 +43,7 @@ builder.Services.AddSingleton(sp =>
     return new MatchmakingRequestHandler(
         sp.GetRequiredService<IMatchmakingEventPublisher>(),
         sp.GetRequiredService<ISystemClock>(),
+        sp.GetRequiredService<IPlayerQueueStateStore>(),
         options.TopicName);
 });
 

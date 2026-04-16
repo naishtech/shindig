@@ -10,6 +10,10 @@ param(
     [string]$KafkaContainerName = "shindig-kafka",
     [string]$KafkaImage = "docker.redpanda.com/redpandadata/redpanda:v24.1.10",
     [int]$KafkaAdminPort = 9644,
+    [string]$RedisEndpoint = "localhost:6379",
+    [string]$RedisContainerName = "shindig-redis",
+    [string]$RedisImage = "redis:7.4-alpine",
+    [int]$RedisPort = 6379,
     [bool]$RecreateStack = $true,
     [string]$InstanceType = "t3.small",
     [string]$AmiId = "ami-localstack",
@@ -24,9 +28,14 @@ if (-not (Test-Path $TemplatePath)) {
 
 $resolvedTemplate = (Resolve-Path $TemplatePath).Path
 $kafkaProvisionScript = Join-Path $PSScriptRoot "start-local-kafka.ps1"
+$redisProvisionScript = Join-Path $PSScriptRoot "start-local-redis.ps1"
 
 if (-not (Test-Path $kafkaProvisionScript)) {
     throw "Kafka provision script not found at $kafkaProvisionScript"
+}
+
+if (-not (Test-Path $redisProvisionScript)) {
+    throw "Redis provision script not found at $redisProvisionScript"
 }
 
 & $kafkaProvisionScript `
@@ -36,12 +45,18 @@ if (-not (Test-Path $kafkaProvisionScript)) {
     -AdminPort $KafkaAdminPort `
     -TopicName $KafkaTopicName
 
+& $redisProvisionScript `
+    -ContainerName $RedisContainerName `
+    -Image $RedisImage `
+    -RedisPort $RedisPort
+
 $parameterOverrides = @(
     "EnvironmentName=$EnvironmentName",
     "AppName=$AppName",
     "AppPort=$AppPort",
     "KafkaBootstrapServers=$KafkaBootstrapServers",
     "KafkaTopicName=$KafkaTopicName",
+    "RedisEndpoint=$RedisEndpoint",
     "InstanceType=$InstanceType",
     "AmiId=$AmiId"
 )
