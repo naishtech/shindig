@@ -75,7 +75,7 @@ Current repository capabilities include:
 ## Local development
 
 ### Prerequisites
-- .NET 9 SDK
+- .NET 10 SDK
 - Docker
 - PowerShell
 
