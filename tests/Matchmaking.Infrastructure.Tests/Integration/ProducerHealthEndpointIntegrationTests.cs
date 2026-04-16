@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
-namespace Matchmaking.Infrastructure.Tests.Component;
+namespace Matchmaking.Infrastructure.Tests.Integration;
 
 /// <summary>
 /// Validates the producer web service in its hosted HTTP shape before LocalStack-backed component coverage is added.
@@ -24,7 +24,7 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
     [Trait("Category", "Integration")]
     public async Task GetHealthAsync_ReturnsHealthyProducerStatus()
     {
-        using var client = _factory.CreateClient();
+        using var client = CreateClient();
 
         var response = await client.GetAsync("/health");
 
@@ -33,5 +33,20 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("MatchMakerProducerWebService", document.RootElement.GetProperty("service").GetString());
         Assert.Equal("healthy", document.RootElement.GetProperty("status").GetString());
+    }
+
+    private HttpClient CreateClient()
+    {
+        var producerBaseUrl = Environment.GetEnvironmentVariable("PRODUCER_BASE_URL");
+
+        if (!string.IsNullOrWhiteSpace(producerBaseUrl))
+        {
+            return new HttpClient
+            {
+                BaseAddress = new Uri(producerBaseUrl, UriKind.Absolute)
+            };
+        }
+
+        return _factory.CreateClient();
     }
 }

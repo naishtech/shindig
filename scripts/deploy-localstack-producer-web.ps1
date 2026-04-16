@@ -8,7 +8,8 @@ param(
     [string]$KafkaBootstrapServers = "host.docker.internal:9092",
     [string]$KafkaTopicName = "mm.player.queue",
     [string]$InstanceType = "t3.small",
-    [string]$AmiId = "ami-localstack"
+    [string]$AmiId = "ami-localstack",
+    [string]$LocalStackContainerName = "shindig-localstack"
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,4 +52,26 @@ if (Get-Command aws -ErrorAction SilentlyContinue) {
     exit $LASTEXITCODE
 }
 
-throw "Neither awslocal nor aws CLI is installed. Install one of them and try again."
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    $containerExists = docker ps --filter "name=$LocalStackContainerName" --format "{{.Names}}"
+
+    if ($containerExists) {
+        $containerTemplatePath = "/tmp/matchmaker-producer-web-localstack.yaml"
+        docker cp $resolvedTemplate "${LocalStackContainerName}:${containerTemplatePath}" | Out-Null
+
+        docker exec $LocalStackContainerName awslocal cloudformation deploy `
+            --stack-name $StackName `
+            --template-file $containerTemplatePath `
+            --capabilities CAPABILITY_NAMED_IAM `
+            --parameter-overrides $parameterOverrides
+
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+
+        docker exec $LocalStackContainerName awslocal cloudformation describe-stacks --stack-name $StackName
+        exit $LASTEXITCODE
+    }
+}
+
+throw "No usable CloudFormation client was found. Install awslocal or aws CLI, or run the LocalStack container named $LocalStackContainerName."
