@@ -1,4 +1,4 @@
-# Shindig Game Matchmaking Template
+# Shindig - Game Matchmaking Template
 
 Shindig is a template project that serves as a basic example of a game matchmaking service for multiplayer backends.
 
@@ -13,7 +13,7 @@ This repository is intended to show the foundations of a reusable, game-agnostic
 - coordinating queue state safely
 - consuming queue events and creating basic matches
 
-This repository is specifically about player queues, match formation, and online game infrastructure. It is not intended for dating or social matchmaking scenarios.
+This repository is specifically about player queues, match formation, and online game infrastructure.
 
 This is best treated as a starter template and learning project rather than a finished production platform.
 
