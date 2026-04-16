@@ -6,7 +6,7 @@ namespace Matchmaking.ProducerWebService.Matchmaking;
 public sealed class RedisOptions
 {
     /// <summary>
-    /// At this point the application is preparing to connect to the Redis coordination endpoint.
+    /// Gets or sets the Redis endpoint used for request coordination.
     /// </summary>
     public string Endpoint { get; set; } = "localhost:6379";
 }

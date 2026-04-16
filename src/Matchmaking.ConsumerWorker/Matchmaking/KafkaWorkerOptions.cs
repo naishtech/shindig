@@ -6,27 +6,27 @@ namespace Matchmaking.ConsumerWorker.Matchmaking;
 public sealed class KafkaWorkerOptions
 {
     /// <summary>
-    /// At this point the worker is preparing to connect to the Kafka bootstrap servers.
+    /// Gets or sets the Kafka bootstrap servers used by the consumer worker.
     /// </summary>
     public string BootstrapServers { get; set; } = "localhost:9092";
 
     /// <summary>
-    /// At this point the worker is preparing to subscribe to the queue lifecycle topic.
+    /// Gets or sets the Kafka topic that receives player queue lifecycle events.
     /// </summary>
     public string InputTopicName { get; set; } = "mm.player.queue";
 
     /// <summary>
-    /// At this point the worker is preparing to publish created matches to Kafka.
+    /// Gets or sets the Kafka topic that receives created match events.
     /// </summary>
     public string OutputTopicName { get; set; } = "mm.match.created";
 
     /// <summary>
-    /// At this point the worker is determining how many compatible players are required to form a match.
+    /// Gets or sets the number of compatible players required to form a match.
     /// </summary>
     public int MatchSize { get; set; } = 2;
 
     /// <summary>
-    /// At this point the worker is preparing its Kafka consumer group identity.
+    /// Gets or sets the Kafka consumer group identifier for the worker.
     /// </summary>
     public string GroupId { get; set; } = "matchmaker-consumer-worker";
 }
