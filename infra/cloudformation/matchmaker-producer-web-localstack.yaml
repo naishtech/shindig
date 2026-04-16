@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: LocalStack-ready CloudFormation stack for the MatchMakerProducerWebService EC2-style host.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: local
+    Description: Environment name injected into the producer web service.
+
+  AppName:
+    Type: String
+    Default: MatchMakerProducerWebService
+    Description: Logical application name.
+
+  AppPort:
+    Type: Number
+    Default: 8080
+    Description: Port exposed by the producer web service.
+
+  KafkaBootstrapServers:
+    Type: String
+    Default: host.docker.internal:9092
+    Description: Kafka bootstrap servers used by the producer.
+
+  KafkaTopicName:
+    Type: String
+    Default: mm.player.queue
+    Description: Kafka topic used for queue lifecycle events.
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    Description: EC2-style instance size for the producer host.
+
+  AmiId:
+    Type: String
+    Default: ami-localstack
+    Description: Placeholder AMI identifier for LocalStack EC2 emulation.
+
+Resources:
+  ProducerVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-vpc
+
+  ProducerInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-igw
+
+  ProducerVpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ProducerVpc
+      InternetGatewayId: !Ref ProducerInternetGateway
+
+  ProducerPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ProducerVpc
+      CidrBlock: 10.42.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: us-east-1a
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-public-subnet
+
+  ProducerRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ProducerVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-public-rt
+
+  ProducerDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ProducerVpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ProducerRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref ProducerInternetGateway
+
+  ProducerSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ProducerRouteTable
+      SubnetId: !Ref ProducerPublicSubnet
+
+  ProducerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Ingress rules for the MatchMaker producer web service.
+      VpcId: !Ref ProducerVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref AppPort
+          ToPort: !Ref AppPort
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}-sg
+
+  ProducerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppName}-${EnvironmentName}-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: !Sub ${AppName}-${EnvironmentName}-inline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  ProducerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ProducerInstanceRole
+
+  ProducerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /shindig/${EnvironmentName}/matchmaker-producer
+      RetentionInDays: 7
+
+  ProducerKafkaBootstrapParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /shindig/${EnvironmentName}/matchmaker-producer/kafka-bootstrap-servers
+      Type: String
+      Value: !Ref KafkaBootstrapServers
+      Description: Kafka bootstrap servers for the producer web service.
+
+  ProducerKafkaTopicParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /shindig/${EnvironmentName}/matchmaker-producer/kafka-topic-name
+      Type: String
+      Value: !Ref KafkaTopicName
+      Description: Kafka topic used by the producer web service.
+
+  ProducerEnvironmentParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /shindig/${EnvironmentName}/matchmaker-producer/environment-name
+      Type: String
+      Value: !Ref EnvironmentName
+      Description: Runtime environment value for the producer web service.
+
+  ProducerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref ProducerInstanceProfile
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          GroupSet:
+            - !Ref ProducerSecurityGroup
+          SubnetId: !Ref ProducerPublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${AppName}-${EnvironmentName}
+        - Key: Workload
+          Value: matchmaker-producer
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          mkdir -p /opt/matchmaker-producer
+          cat >/opt/matchmaker-producer/runtime.env <<EOF
+          ASPNETCORE_ENVIRONMENT=${EnvironmentName}
+          ASPNETCORE_URLS=http://0.0.0.0:${AppPort}
+          Kafka__BootstrapServers=${KafkaBootstrapServers}
+          Kafka__TopicName=${KafkaTopicName}
+          EOF
+          cat >/opt/matchmaker-producer/README.txt <<EOF
+          MatchMakerProducerWebService placeholder host provisioned by LocalStack CloudFormation.
+          Deploy the published application artifact separately and start it with the values in runtime.env.
+          EOF
+
+Outputs:
+  StackName:
+    Description: Deployed stack name.
+    Value: !Ref AWS::StackName
+
+  ProducerInstanceId:
+    Description: EC2-style instance identifier for the producer web service.
+    Value: !Ref ProducerInstance
+
+  ProducerBaseUrl:
+    Description: Intended local endpoint for the producer web service.
+    Value: !Sub http://localhost:${AppPort}
+
+  KafkaBootstrapParameterName:
+    Description: SSM parameter containing Kafka bootstrap servers.
+    Value: !Ref ProducerKafkaBootstrapParameter
+
+  KafkaTopicParameterName:
+    Description: SSM parameter containing the queue topic name.
+    Value: !Ref ProducerKafkaTopicParameter

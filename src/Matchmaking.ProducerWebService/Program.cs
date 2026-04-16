@@ -12,11 +12,14 @@ builder.Services.AddSingleton(sp => new MatchmakingRequestHandler(
 
 var app = builder.Build();
 
-app.MapGet("/", () => Results.Ok(new
+var healthPayload = new
 {
     service = "MatchMakerProducerWebService",
     status = "healthy"
-}));
+};
+
+app.MapGet("/", () => Results.Ok(healthPayload));
+app.MapGet("/health", () => Results.Ok(healthPayload));
 
 app.MapPost("/matchmaking/join", async (
     QueuePlayerRequest request,
@@ -55,3 +58,5 @@ app.MapPost("/matchmaking/cancel", async (
 });
 
 app.Run();
+
+public partial class Program;
