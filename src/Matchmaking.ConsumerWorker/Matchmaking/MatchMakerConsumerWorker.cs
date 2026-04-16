@@ -8,6 +8,7 @@ public sealed class MatchMakerConsumerWorker
     private readonly IMatchmakingPoolStore _poolStore;
     private readonly IMatchResultPublisher _publisher;
     private readonly ISystemClock _clock;
+    private readonly int _matchSize;
 
     /// <summary>
     /// At this point the worker dependencies are being prepared for queue event handling.
@@ -15,11 +16,13 @@ public sealed class MatchMakerConsumerWorker
     public MatchMakerConsumerWorker(
         IMatchmakingPoolStore poolStore,
         IMatchResultPublisher publisher,
+        KafkaWorkerOptions? options = null,
         ISystemClock? clock = null)
     {
         _poolStore = poolStore;
         _publisher = publisher;
         _clock = clock ?? new SystemClock();
+        _matchSize = Math.Max(2, options?.MatchSize ?? 2);
     }
 
     /// <summary>
@@ -33,13 +36,13 @@ public sealed class MatchMakerConsumerWorker
             case "PLAYER_UPDATE_ATTRIBUTES":
                 var players = await _poolStore.UpsertPlayerAsync(matchmakingEvent, cancellationToken);
 
-                if (players.Count < 2)
+                if (players.Count < _matchSize)
                 {
                     return;
                 }
 
                 var matchedPlayers = players
-                    .Take(2)
+                    .Take(_matchSize)
                     .Select(player => new MatchedPlayer(player.PlayerId, player.Attributes))
                     .ToList();
 

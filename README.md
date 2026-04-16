@@ -111,7 +111,6 @@ dotnet run --project ./src/Matchmaking.ConsumerWorker
 
 Suggested next steps for the template are:
 
-- expand beyond the current basic two-player match creation flow
 - add richer rule-driven matchmaking behavior
 - support configurable matchmaking rules
 - add deployment examples for cloud hosting

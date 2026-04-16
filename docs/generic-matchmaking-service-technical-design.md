@@ -45,7 +45,7 @@ Its responsibility is limited to managing queues and emitting match results for 
 - Consumes queue events from Kafka
 - Uses Redis as the authoritative source of queue and pool state
 - Maintains the active player pool for each partition key
-- In the current template implementation, forms a basic match when two compatible players are available in the same partition
+- In the current template implementation, forms a basic match when the configured number of compatible players are available in the same partition
 - Provides the foundation for future wait-time expansion and richer rule evaluation
 - Emits `MatchCreated` events back into Kafka for downstream consumers
 

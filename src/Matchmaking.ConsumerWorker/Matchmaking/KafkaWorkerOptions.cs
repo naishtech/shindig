@@ -21,6 +21,11 @@ public sealed class KafkaWorkerOptions
     public string OutputTopicName { get; set; } = "mm.match.created";
 
     /// <summary>
+    /// At this point the worker is determining how many compatible players are required to form a match.
+    /// </summary>
+    public int MatchSize { get; set; } = 2;
+
+    /// <summary>
     /// At this point the worker is preparing its Kafka consumer group identity.
     /// </summary>
     public string GroupId { get; set; } = "matchmaker-consumer-worker";

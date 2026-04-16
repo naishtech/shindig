@@ -72,6 +72,50 @@ public sealed class MatchMakerConsumerWorkerTests
     }
 
     [Fact]
+    public async Task HandleAsync_WhenMatchSizeIsThree_PublishesThreePlayerMatch()
+    {
+        var poolStore = new Mock<IMatchmakingPoolStore>(MockBehavior.Strict);
+        var publisher = new Mock<IMatchResultPublisher>();
+        MatchCreatedEvent? publishedEvent = null;
+
+        var matchmakingEvent = CreateJoinEvent("player-3");
+
+        poolStore
+            .Setup(x => x.UpsertPlayerAsync(matchmakingEvent, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                CreatePoolEntry("player-1"),
+                CreatePoolEntry("player-2"),
+                CreatePoolEntry("player-3")
+            });
+
+        poolStore
+            .Setup(x => x.RemovePlayersAsync(
+                It.Is<IReadOnlyCollection<string>>(ids => ids.Count == 3 && ids.Contains("player-1") && ids.Contains("player-2") && ids.Contains("player-3")),
+                matchmakingEvent.PartitionKey,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        publisher
+            .Setup(x => x.PublishMatchCreatedAsync(It.IsAny<MatchCreatedEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<MatchCreatedEvent, CancellationToken>((matchEvent, _) => publishedEvent = matchEvent)
+            .Returns(Task.CompletedTask);
+
+        var sut = new MatchMakerConsumerWorker(
+            poolStore.Object,
+            publisher.Object,
+            new KafkaWorkerOptions { MatchSize = 3 });
+
+        await sut.HandleAsync(matchmakingEvent, CancellationToken.None);
+
+        Assert.NotNull(publishedEvent);
+        Assert.Equal(3, publishedEvent!.Players.Count);
+        Assert.Contains(publishedEvent.Players, player => player.PlayerId == "player-1");
+        Assert.Contains(publishedEvent.Players, player => player.PlayerId == "player-2");
+        Assert.Contains(publishedEvent.Players, player => player.PlayerId == "player-3");
+    }
+
+    [Fact]
     public async Task HandleAsync_ForDequeuedEvent_RemovesPlayerWithoutPublishingMatch()
     {
         var poolStore = new Mock<IMatchmakingPoolStore>(MockBehavior.Strict);
