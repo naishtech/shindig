@@ -45,8 +45,8 @@ Its responsibility is limited to managing queues and emitting match results for 
 - Consumes queue events from Kafka
 - Uses Redis as the authoritative source of queue and pool state
 - Maintains the active player pool for each partition key
-- Periodically scans the pool to form matches
-- Widens skill tolerance over time for players who have waited longer
+- In the current template implementation, forms a basic match when two compatible players are available in the same partition
+- Provides the foundation for future wait-time expansion and richer rule evaluation
 - Emits `MatchCreated` events back into Kafka for downstream consumers
 
 #### 2.5 Redis
@@ -68,7 +68,7 @@ These are outside the matchmaking service boundary:
 3. The producer service publishes queue events to Kafka.
 4. MatchMakerConsumerWorker instances consume those events and update Redis.
 5. Redis remains the authoritative source of queue and pool state while Kafka feeds the event stream.
-6. Workers periodically scan Redis-backed pools, widen skill tolerance over time, and form matches.
+6. Workers consume queue events, maintain Redis-backed pools, and form basic matches for compatible players.
 7. When a valid match is found, the worker emits a `MatchCreated` event back into Kafka.
 8. Downstream systems react to matchmaking and queue lifecycle events.
 

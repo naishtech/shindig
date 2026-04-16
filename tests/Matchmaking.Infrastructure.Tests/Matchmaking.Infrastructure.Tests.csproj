@@ -25,5 +25,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Matchmaking.Infrastructure\Matchmaking.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Matchmaking.ProducerWebService\Matchmaking.ProducerWebService.csproj" />
+    <ProjectReference Include="..\..\src\Matchmaking.ConsumerWorker\Matchmaking.ConsumerWorker.csproj" />
   </ItemGroup>
 </Project>

@@ -11,7 +11,7 @@ This repository is intended to show the foundations of a reusable, game-agnostic
 - accepting player queue requests
 - publishing queue lifecycle events
 - coordinating queue state safely
-- forming a base for future worker-driven match creation
+- consuming queue events and creating basic matches
 
 This is best treated as a starter template and learning project rather than a finished production platform.
 
@@ -41,10 +41,11 @@ The template currently includes or defines the following services:
 - helps prevent duplicate handling during concurrent requests
 
 ### MatchMakerConsumerWorker
-- planned next service in the template architecture
-- will consume queue events from Kafka
-- will manage candidate pools and form matches
-- will publish match-created events for downstream consumers
+- implemented in this repository as a basic worker service
+- consumes queue lifecycle events from Kafka
+- maintains partition-based candidate pools in Redis
+- creates simple matches when enough compatible players are available
+- publishes match-created events for downstream consumers
 
 ### Downstream Services
 Examples shown in the architecture include:
@@ -57,15 +58,18 @@ Examples shown in the architecture include:
 Current repository capabilities include:
 
 - a .NET producer web service
+- a .NET consumer worker service
 - queue lifecycle endpoints
-- Kafka event publishing
-- Redis-backed concurrency protection
+- Kafka event publishing and consumption
+- Redis-backed concurrency protection and player pooling
+- basic match creation for compatible queued players
 - LocalStack-oriented infrastructure templates and scripts
 - automated unit and component tests
 
 ## Project structure
 
 - src/Matchmaking.ProducerWebService — HTTP producer service
+- src/Matchmaking.ConsumerWorker — Kafka consumer and basic match creation worker
 - src/Matchmaking.Infrastructure — shared infrastructure code
 - tests/Matchmaking.Infrastructure.Tests — unit and component tests
 - infra/cloudformation — local infrastructure templates
@@ -97,12 +101,18 @@ dotnet test
 dotnet run --project ./src/Matchmaking.ProducerWebService
 ```
 
+### Start the consumer worker
+
+```powershell
+dotnet run --project ./src/Matchmaking.ConsumerWorker
+```
+
 ## Roadmap
 
 Suggested next steps for the template are:
 
-- implement the MatchMakerConsumerWorker
-- add end-to-end match formation flows
+- expand beyond the current basic two-player match creation flow
+- add richer rule-driven matchmaking behavior
 - support configurable matchmaking rules
 - add deployment examples for cloud hosting
 - improve operational documentation for open-source contributors
