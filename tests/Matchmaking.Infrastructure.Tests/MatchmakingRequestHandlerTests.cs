@@ -51,6 +51,67 @@ public class MatchmakingRequestHandlerTests
     }
 
     [Fact]
+    public async Task LeaveQueueAsync_PublishesLeaveQueueEvent()
+    {
+        var utcNow = new DateTimeOffset(2026, 4, 16, 10, 3, 0, TimeSpan.Zero);
+        var publisher = new Mock<IMatchmakingEventPublisher>();
+        var clock = new Mock<ISystemClock>();
+        MatchmakingEvent? publishedEvent = null;
+
+        clock.SetupGet(x => x.UtcNow).Returns(utcNow);
+        publisher
+            .Setup(x => x.PublishAsync(It.IsAny<string>(), It.IsAny<MatchmakingEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<string, MatchmakingEvent, CancellationToken>((_, message, _) => publishedEvent = message)
+            .Returns(Task.CompletedTask);
+
+        var sut = new MatchmakingRequestHandler(publisher.Object, clock.Object, "mm.player.queue");
+
+        await sut.LeaveQueueAsync(new LeaveQueueRequest("player-123", "default", "oce", "duo", "1400-1499", "player-left"), CancellationToken.None);
+
+        Assert.NotNull(publishedEvent);
+        Assert.Equal("PLAYER_LEAVE_QUEUE", publishedEvent!.EventType);
+        Assert.Equal("player-left", publishedEvent.Reason);
+        Assert.Equal("oce:duo:1400-1499", publishedEvent.PartitionKey);
+        Assert.Equal(utcNow, publishedEvent.Timestamp);
+    }
+
+    [Fact]
+    public async Task UpdatePlayerAsync_PublishesUpdateAttributesEvent()
+    {
+        var utcNow = new DateTimeOffset(2026, 4, 16, 10, 4, 0, TimeSpan.Zero);
+        var publisher = new Mock<IMatchmakingEventPublisher>();
+        var clock = new Mock<ISystemClock>();
+        MatchmakingEvent? publishedEvent = null;
+
+        clock.SetupGet(x => x.UtcNow).Returns(utcNow);
+        publisher
+            .Setup(x => x.PublishAsync(It.IsAny<string>(), It.IsAny<MatchmakingEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<string, MatchmakingEvent, CancellationToken>((_, message, _) => publishedEvent = message)
+            .Returns(Task.CompletedTask);
+
+        var sut = new MatchmakingRequestHandler(publisher.Object, clock.Object, "mm.player.queue");
+
+        await sut.UpdatePlayerAsync(
+            new UpdatePlayerRequest(
+                "player-123",
+                "default",
+                "oce",
+                "duo",
+                "1400-1499",
+                new Dictionary<string, string> { ["latency"] = "28", ["mmr"] = "1450" },
+                new Dictionary<string, string> { ["gameId"] = "game-xyz" }),
+            CancellationToken.None);
+
+        Assert.NotNull(publishedEvent);
+        Assert.Equal("PLAYER_UPDATE_ATTRIBUTES", publishedEvent!.EventType);
+        Assert.Equal("28", publishedEvent.Attributes["latency"]);
+        Assert.Equal("1450", publishedEvent.Attributes["mmr"]);
+        Assert.Equal("game-xyz", publishedEvent.Metadata["gameId"]);
+        Assert.Equal("oce:duo:1400-1499", publishedEvent.PartitionKey);
+        Assert.Equal(utcNow, publishedEvent.Timestamp);
+    }
+
+    [Fact]
     public async Task CancelQueueAsync_PublishesPlayerDequeuedEvent()
     {
         var utcNow = new DateTimeOffset(2026, 4, 16, 10, 5, 0, TimeSpan.Zero);

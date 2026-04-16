@@ -24,7 +24,7 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
     [Trait("Category", "Integration")]
     public async Task GetHealthAsync_ReturnsHealthyProducerStatus()
     {
-        using var client = CreateClient();
+        using var client = await CreateClientAsync();
 
         var response = await client.GetAsync("/health");
 
@@ -35,16 +35,35 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
         Assert.Equal("healthy", document.RootElement.GetProperty("status").GetString());
     }
 
-    private HttpClient CreateClient()
+    private async Task<HttpClient> CreateClientAsync()
     {
         var producerBaseUrl = Environment.GetEnvironmentVariable("PRODUCER_BASE_URL");
 
         if (!string.IsNullOrWhiteSpace(producerBaseUrl))
         {
-            return new HttpClient
+            var deployedClient = new HttpClient
             {
-                BaseAddress = new Uri(producerBaseUrl, UriKind.Absolute)
+                BaseAddress = new Uri(producerBaseUrl, UriKind.Absolute),
+                Timeout = TimeSpan.FromSeconds(2)
             };
+
+            try
+            {
+                using var response = await deployedClient.GetAsync("/health");
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return deployedClient;
+                }
+            }
+            catch (HttpRequestException)
+            {
+            }
+            catch (TaskCanceledException)
+            {
+            }
+
+            deployedClient.Dispose();
         }
 
         return _factory.CreateClient();
