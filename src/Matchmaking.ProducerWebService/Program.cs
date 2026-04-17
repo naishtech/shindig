@@ -22,7 +22,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
         EndPoints = { options.Endpoint }
     });
 });
-builder.Services.AddSingleton<IProducer<Null, string>>(sp =>
+builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<KafkaProducerOptions>>().Value;
 
@@ -96,4 +96,3 @@ app.MapPost("/matchmaking/cancel", async (
 
 app.Run();
 
-public partial class Program;

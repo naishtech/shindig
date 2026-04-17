@@ -1,0 +1,48 @@
+sequenceDiagram
+    autonumber
+    actor Backend as Game Backend
+    participant API as API Gateway
+    participant Producer as Producer Web Service
+    participant RedisState as Redis queue state
+    participant QueueTopic as Kafka topic mm.player.queue
+    participant Worker as Consumer Worker
+    participant RedisPool as Redis matchmaking pool
+    participant ResultTopic as Kafka topic mm.match.created
+    participant Downstream as Session / Notification / Analytics
+
+    Backend->>API: Join, update, leave, or cancel request
+    API->>Producer: Forward validated matchmaking request
+
+    alt Join request
+        Producer->>RedisState: TryQueuePlayerAsync
+        RedisState-->>Producer: Queue claim accepted or duplicate suppressed
+        opt State claim accepted
+            Producer->>QueueTopic: Publish PLAYER_JOIN_QUEUE
+        end
+    else Update request
+        Producer->>RedisState: TryUpdatePlayerAsync
+        RedisState-->>Producer: Existing queued player updated
+        Producer->>QueueTopic: Publish PLAYER_UPDATE_ATTRIBUTES
+    else Leave or cancel request
+        Producer->>RedisState: TryRemovePlayerAsync
+        RedisState-->>Producer: Player removed from stored queue state
+        Producer->>QueueTopic: Publish PLAYER_LEAVE_QUEUE or PLAYER_DEQUEUED
+    end
+
+    Note over QueueTopic,Worker: Events are partitioned by region:gameMode:skillBracket
+
+    QueueTopic-->>Worker: Consume matchmaking lifecycle event
+
+    alt Join or update event
+        Worker->>RedisPool: Upsert player into partition pool
+        RedisPool-->>Worker: Return compatible queued players
+        alt Enough players for a match
+            Worker->>ResultTopic: Publish MATCH_CREATED
+            Worker->>RedisPool: Remove matched players from pool
+            ResultTopic-->>Downstream: Allocate session, notify players, record analytics
+        else Not enough players yet
+            Worker-->>Worker: Wait for more queue events
+        end
+    else Leave, dequeue, or match cancelled event
+        Worker->>RedisPool: Remove player from partition pool
+    end

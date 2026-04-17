@@ -13,6 +13,7 @@
 - Follow TDD for behavior changes.
 - Keep changes small and production-focused.
 - Verify with relevant tests before claiming completion.
+- Develop code one class at a time at most, then pause for user review before continuing to additional classes.
 - Add short descriptions to public classes, interfaces, and methods.
 - Method descriptions should briefly state the system state at the time they are called.
 - Use dependency injection to assign concrete implementations to interfaces.
