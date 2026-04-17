@@ -35,6 +35,21 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
         Assert.Equal("healthy", document.RootElement.GetProperty("status").GetString());
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task GetOpenApiDocumentAsync_ExposesMatchmakingJoinEndpoint()
+    {
+        using var client = await CreateClientAsync();
+
+        var response = await client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(document.RootElement.TryGetProperty("paths", out var paths));
+        Assert.True(paths.TryGetProperty("/matchmaking/join", out _));
+    }
+
     private async Task<HttpClient> CreateClientAsync()
     {
         var producerBaseUrl = Environment.GetEnvironmentVariable("PRODUCER_BASE_URL");

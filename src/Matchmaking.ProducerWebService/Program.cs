@@ -6,6 +6,7 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddOpenApi();
 builder.Services.Configure<KafkaProducerOptions>(builder.Configuration.GetSection("Kafka"));
 builder.Services.Configure<RedisOptions>(builder.Configuration.GetSection("Redis"));
 builder.Services.AddSingleton<ISystemClock, SystemClock>();
@@ -49,14 +50,21 @@ builder.Services.AddSingleton(sp =>
 
 var app = builder.Build();
 
+app.MapOpenApi();
+
 var healthPayload = new
 {
     service = "MatchMakerProducerWebService",
     status = "healthy"
 };
 
-app.MapGet("/", () => Results.Ok(healthPayload));
-app.MapGet("/health", () => Results.Ok(healthPayload));
+app.MapGet("/", () => Results.Ok(healthPayload))
+    .WithName("GetProducerRoot")
+    .WithSummary("Returns the producer service status.");
+
+app.MapGet("/health", () => Results.Ok(healthPayload))
+    .WithName("GetProducerHealth")
+    .WithSummary("Returns the producer health payload.");
 
 app.MapPost("/matchmaking/join", async (
     QueuePlayerRequest request,
@@ -65,7 +73,10 @@ app.MapPost("/matchmaking/join", async (
 {
     await handler.QueuePlayerAsync(request, cancellationToken);
     return Results.Accepted();
-});
+})
+    .WithName("JoinMatchmakingQueue")
+    .WithTags("Matchmaking")
+    .WithSummary("Queues a player for matchmaking.");
 
 app.MapPost("/matchmaking/leave", async (
     LeaveQueueRequest request,
@@ -74,7 +85,10 @@ app.MapPost("/matchmaking/leave", async (
 {
     await handler.LeaveQueueAsync(request, cancellationToken);
     return Results.Accepted();
-});
+})
+    .WithName("LeaveMatchmakingQueue")
+    .WithTags("Matchmaking")
+    .WithSummary("Removes a player from the matchmaking queue.");
 
 app.MapPost("/matchmaking/update", async (
     UpdatePlayerRequest request,
@@ -83,7 +97,10 @@ app.MapPost("/matchmaking/update", async (
 {
     await handler.UpdatePlayerAsync(request, cancellationToken);
     return Results.Accepted();
-});
+})
+    .WithName("UpdateQueuedPlayer")
+    .WithTags("Matchmaking")
+    .WithSummary("Updates a queued player's matchmaking attributes.");
 
 app.MapPost("/matchmaking/cancel", async (
     CancelQueueRequest request,
@@ -92,7 +109,10 @@ app.MapPost("/matchmaking/cancel", async (
 {
     await handler.CancelQueueAsync(request, cancellationToken);
     return Results.Accepted();
-});
+})
+    .WithName("CancelMatchmakingQueueEntry")
+    .WithTags("Matchmaking")
+    .WithSummary("Cancels a player's matchmaking request.");
 
 app.Run();
 
