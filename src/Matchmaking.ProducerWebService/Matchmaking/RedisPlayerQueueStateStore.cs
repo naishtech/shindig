@@ -53,6 +53,8 @@ public sealed class RedisPlayerQueueStateStore : IPlayerQueueStateStore
                 request.Region,
                 request.GameMode,
                 request.SkillBracket,
+                request.Attributes,
+                request.Metadata,
                 PartitionKey = $"{request.Region}:{request.GameMode}:{request.SkillBracket}",
                 UpdatedAt = DateTimeOffset.UtcNow
             });
@@ -63,6 +65,53 @@ public sealed class RedisPlayerQueueStateStore : IPlayerQueueStateStore
         {
             await database.LockReleaseAsync(lockKey, lockToken);
         }
+    }
+
+    /// <summary>
+    /// At this point the queued players for a named queue are being loaded from Redis state.
+    /// </summary>
+    public async Task<IReadOnlyList<QueuePlayerRequest>> GetQueuedPlayersAsync(string queueName, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var database = _connectionMultiplexer.GetDatabase();
+        var players = new List<QueuePlayerRequest>();
+        var observedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var endpoint in _connectionMultiplexer.GetEndPoints())
+        {
+            var server = _connectionMultiplexer.GetServer(endpoint);
+
+            if (!server.IsConnected)
+            {
+                continue;
+            }
+
+            foreach (var key in server.Keys(database.Database, pattern: "mm:player:*"))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var keyName = key.ToString();
+
+                if (!observedKeys.Add(keyName))
+                {
+                    continue;
+                }
+
+                var storedState = await database.StringGetAsync(key);
+
+                if (!storedState.HasValue ||
+                    !TryReadQueuedPlayer(storedState!, out var player) ||
+                    !string.Equals(player.QueueName, queueName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                players.Add(player);
+            }
+        }
+
+        return players;
     }
 
     /// <summary>
@@ -143,5 +192,65 @@ public sealed class RedisPlayerQueueStateStore : IPlayerQueueStateStore
     private static string BuildLockKey(string playerId)
     {
         return $"mm:lock:{playerId}";
+    }
+
+    private static bool TryReadQueuedPlayer(string storedState, out QueuePlayerRequest player)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(storedState);
+            var root = document.RootElement;
+
+            player = new QueuePlayerRequest(
+                PlayerId: ReadRequiredString(root, nameof(QueuePlayerRequest.PlayerId)),
+                QueueName: ReadRequiredString(root, nameof(QueuePlayerRequest.QueueName)),
+                Region: ReadRequiredString(root, nameof(QueuePlayerRequest.Region)),
+                GameMode: ReadRequiredString(root, nameof(QueuePlayerRequest.GameMode)),
+                SkillBracket: ReadRequiredString(root, nameof(QueuePlayerRequest.SkillBracket)),
+                Attributes: ReadDictionary(root, nameof(QueuePlayerRequest.Attributes)),
+                Metadata: ReadDictionary(root, nameof(QueuePlayerRequest.Metadata)));
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            player = new QueuePlayerRequest(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, null, null);
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            player = new QueuePlayerRequest(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, null, null);
+            return false;
+        }
+    }
+
+    private static string ReadRequiredString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property)
+            ? property.GetString() ?? string.Empty
+            : string.Empty;
+    }
+
+    private static IReadOnlyDictionary<string, string>? ReadDictionary(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (property.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in property.EnumerateObject())
+        {
+            values[item.Name] = item.Value.GetString() ?? string.Empty;
+        }
+
+        return values;
     }
 }

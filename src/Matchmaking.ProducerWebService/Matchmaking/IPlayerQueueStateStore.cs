@@ -11,6 +11,11 @@ public interface IPlayerQueueStateStore
     Task<bool> TryQueuePlayerAsync(QueuePlayerRequest request, CancellationToken cancellationToken);
 
     /// <summary>
+    /// At this point the queued players for a named queue are being read for inspection.
+    /// </summary>
+    Task<IReadOnlyList<QueuePlayerRequest>> GetQueuedPlayersAsync(string queueName, CancellationToken cancellationToken);
+
+    /// <summary>
     /// At this point a queued player's stored state is being refreshed after an attribute change.
     /// </summary>
     Task<bool> TryUpdatePlayerAsync(UpdatePlayerRequest request, CancellationToken cancellationToken);
