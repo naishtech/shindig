@@ -130,6 +130,53 @@ dotnet run --project ./src/Matchmaking.ConsumerWorker
 dotnet test
 ```
 
+## Using the SDK in a game backend
+
+A game developer can reference the SDK project and use the provided HTTP client from their title backend service.
+
+Typical flow:
+
+1. create an `HttpClient` pointing at the producer service
+2. create a `MatchmakingApiClient`
+3. queue, update, leave, or cancel players as the game session changes
+
+Example:
+
+```csharp
+using Matchmaking.SDK.Matchmaking;
+
+var httpClient = new HttpClient
+{
+    BaseAddress = new Uri("http://localhost:5000")
+};
+
+var matchmakingClient = new MatchmakingApiClient(httpClient);
+
+await matchmakingClient.QueuePlayerAsync(
+    playerId: "player-001",
+    queueName: "default-queue",
+    region: "local-dev",
+    gameMode: "casual-duo",
+    skillBracket: "bronze",
+    attributes: new Dictionary<string, string>
+    {
+        ["preferredRole"] = "support",
+        ["inputType"] = "controller"
+    },
+    metadata: new Dictionary<string, string>
+    {
+        ["ticketId"] = "ticket-1001"
+    },
+    cancellationToken: CancellationToken.None);
+```
+
+From there, the title backend can:
+
+- call `UpdatePlayerAsync` when player preferences change
+- call `LeaveQueueAsync` when a player exits matchmaking normally
+- call `CancelQueueAsync` when the search should be terminated immediately
+- call the queue inspection endpoint from the API page to view current queue state during development
+
 ## Roadmap
 
 Suggested next steps for the template are:

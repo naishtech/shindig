@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace Matchmaking.SDK.Matchmaking;
 
@@ -123,6 +124,18 @@ public sealed class MatchmakingApiClient
                 reason
             },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// At this point a title backend is reading the currently queued players for a named queue.
+    /// </summary>
+    public async Task<JsonDocument> GetQueuedPlayersAsync(string queueName, CancellationToken cancellationToken)
+    {
+        var encodedQueueName = Uri.EscapeDataString(queueName);
+        var response = await _httpClient.GetAsync($"/matchmaking/queues/{encodedQueueName}/players", cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
     private async Task PostAsync(string relativePath, object payload, CancellationToken cancellationToken)

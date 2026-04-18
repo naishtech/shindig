@@ -46,17 +46,67 @@ public sealed class MatchmakingApiClientTests
         Assert.Equal("game-xyz", document.RootElement.GetProperty("metadata").GetProperty("gameId").GetString());
     }
 
+    [Fact]
+    public async Task GetQueuedPlayersAsync_CallsQueueInspectionEndpointAndReturnsPayload()
+    {
+        const string responseBody = """
+            {
+              "queueName": "default",
+              "players": [
+                {
+                  "playerId": "player-123",
+                  "region": "oce",
+                  "gameMode": "duo",
+                  "skillBracket": "1400-1499",
+                  "attributes": {
+                    "latency": "32"
+                  },
+                  "metadata": {
+                    "gameId": "game-xyz"
+                  }
+                }
+              ]
+            }
+            """;
+
+        var handler = new CapturingHttpMessageHandler(HttpStatusCode.OK, responseBody);
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://matchmaking.example/")
+        };
+
+        var sut = new MatchmakingApiClient(httpClient);
+
+        using var document = await sut.GetQueuedPlayersAsync("default", CancellationToken.None);
+
+        Assert.NotNull(handler.Request);
+        Assert.Equal(HttpMethod.Get, handler.Request!.Method);
+        Assert.Equal("https://matchmaking.example/matchmaking/queues/default/players", handler.Request.RequestUri!.ToString());
+        Assert.Equal("default", document.RootElement.GetProperty("queueName").GetString());
+        Assert.Equal("player-123", document.RootElement.GetProperty("players")[0].GetProperty("playerId").GetString());
+    }
+
     private sealed class CapturingHttpMessageHandler : HttpMessageHandler
     {
+        private readonly HttpStatusCode _statusCode;
+        private readonly string? _responseBody;
+
+        public CapturingHttpMessageHandler(HttpStatusCode statusCode = HttpStatusCode.Accepted, string? responseBody = null)
+        {
+            _statusCode = statusCode;
+            _responseBody = responseBody;
+        }
+
         public HttpRequestMessage? Request { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Request = request;
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted)
+            return Task.FromResult(new HttpResponseMessage(_statusCode)
             {
-                RequestMessage = request
+                RequestMessage = request,
+                Content = _responseBody is null ? null : new StringContent(_responseBody)
             });
         }
     }
