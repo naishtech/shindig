@@ -50,6 +50,18 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
         Assert.True(paths.TryGetProperty("/matchmaking/join", out _));
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task GetApiReferencePageAsync_ReturnsInteractiveApiPage()
+    {
+        using var client = await CreateClientAsync();
+
+        var response = await client.GetAsync("/scalar/v1");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Scalar", await response.Content.ReadAsStringAsync());
+    }
+
     private async Task<HttpClient> CreateClientAsync()
     {
         var producerBaseUrl = Environment.GetEnvironmentVariable("PRODUCER_BASE_URL");

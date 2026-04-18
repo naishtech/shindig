@@ -2,6 +2,7 @@ using Confluent.Kafka;
 using Matchmaking.Infrastructure.Ping;
 using Matchmaking.ProducerWebService.Matchmaking;
 using Microsoft.Extensions.Options;
+using Scalar.AspNetCore;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -51,6 +52,7 @@ builder.Services.AddSingleton(sp =>
 var app = builder.Build();
 
 app.MapOpenApi();
+app.MapScalarApiReference();
 
 var healthPayload = new
 {
