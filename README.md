@@ -82,31 +82,42 @@ Current repository capabilities include:
 
 ### Prerequisites
 - .NET 10 SDK
-- Docker
+- Docker Desktop installed and running
 - PowerShell
 
-### Run the local infrastructure
+### Getting started
+
+1. Start Docker Desktop and wait for the local container engine to be fully running.
+2. Deploy the local infrastructure:
 
 ```powershell
 pwsh ./scripts/deploy-localstack-producer-web.ps1
+```
+
+3. Start the producer service:
+
+```powershell
+dotnet run --project ./src/Matchmaking.ProducerWebService
+```
+
+4. Open the API test page in your browser:
+
+```text
+http://localhost:5000/scalar/v1
+```
+
+Use this page to confirm the service is up and to try the available endpoints. You can also quickly verify the health payload at `http://localhost:5000/health`.
+
+5. Start the consumer worker in a separate terminal:
+
+```powershell
+dotnet run --project ./src/Matchmaking.ConsumerWorker
 ```
 
 ### Run the test suite
 
 ```powershell
 dotnet test
-```
-
-### Start the producer service
-
-```powershell
-dotnet run --project ./src/Matchmaking.ProducerWebService
-```
-
-### Start the consumer worker
-
-```powershell
-dotnet run --project ./src/Matchmaking.ConsumerWorker
 ```
 
 ## Roadmap
