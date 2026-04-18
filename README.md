@@ -28,9 +28,10 @@ The template currently includes or defines the following services:
 
 ### MatchMakerProducerWebService
 - implemented in this repository
-- exposes health, join, leave, update, and cancel endpoints
+- exposes health, join, leave, update, cancel, and queue inspection endpoints
 - publishes matchmaking lifecycle events to Kafka
 - uses Redis to suppress duplicate concurrent queue operations
+- can return the players currently stored in a named queue
 
 ### Kafka
 - acts as the event transport layer
@@ -62,6 +63,7 @@ Current repository capabilities include:
 - a .NET producer web service
 - a .NET consumer worker service
 - queue lifecycle endpoints
+- a queue lookup endpoint for viewing currently queued players by queue name
 - Kafka event publishing and consumption
 - Redis-backed concurrency protection and player pooling
 - basic match creation for compatible queued players
@@ -106,7 +108,15 @@ dotnet run --project ./src/Matchmaking.ProducerWebService
 http://localhost:5000/scalar/v1
 ```
 
-Use this page to confirm the service is up and to try the available endpoints. You can also quickly verify the health payload at `http://localhost:5000/health`.
+Use this page to confirm the service is up and to try the available endpoints. You can also quickly verify the health payload at http://localhost:5000/health.
+
+Example routes now available in the API page include:
+- GET /health
+- POST /matchmaking/join
+- POST /matchmaking/leave
+- POST /matchmaking/update
+- POST /matchmaking/cancel
+- GET /matchmaking/queues/{queueName}/players
 
 5. Start the consumer worker in a separate terminal:
 
