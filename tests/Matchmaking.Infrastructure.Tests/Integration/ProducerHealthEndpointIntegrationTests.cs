@@ -62,6 +62,42 @@ public sealed class ProducerHealthEndpointIntegrationTests : IClassFixture<WebAp
         Assert.Contains("Scalar", await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task GetOpenApiDocumentAsync_ProvidesSensibleMatchmakingExamples()
+    {
+        using var client = await CreateClientAsync();
+
+        var response = await client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        var joinExample = paths
+            .GetProperty("/matchmaking/join")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("example");
+
+        Assert.Equal("player-001", joinExample.GetProperty("playerId").GetString());
+        Assert.Equal("default-queue", joinExample.GetProperty("queueName").GetString());
+        Assert.Equal("support", joinExample.GetProperty("attributes").GetProperty("preferredRole").GetString());
+
+        var cancelExample = paths
+            .GetProperty("/matchmaking/cancel")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("example");
+
+        Assert.Equal("player-cancelled-search", cancelExample.GetProperty("reason").GetString());
+    }
+
     private async Task<HttpClient> CreateClientAsync()
     {
         var producerBaseUrl = Environment.GetEnvironmentVariable("PRODUCER_BASE_URL");

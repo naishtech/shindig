@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Confluent.Kafka;
 using Matchmaking.Infrastructure.Ping;
 using Matchmaking.ProducerWebService.Matchmaking;
@@ -7,7 +8,97 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddOperationTransformer((operation, context, cancellationToken) =>
+    {
+        var requestBody = operation.RequestBody;
+
+        if (requestBody is null || requestBody.Content is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!requestBody.Content.TryGetValue("application/json", out var mediaType) ||
+            mediaType is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var relativePath = context.Description?.RelativePath;
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return Task.CompletedTask;
+        }
+
+        var example = relativePath switch
+        {
+            "matchmaking/join" => JsonSerializer.SerializeToNode(new
+            {
+                playerId = "player-001",
+                queueName = "default-queue",
+                region = "local-dev",
+                gameMode = "casual-duo",
+                skillBracket = "bronze",
+                attributes = new
+                {
+                    preferredRole = "support",
+                    inputType = "controller"
+                },
+                metadata = new
+                {
+                    ticketId = "ticket-1001",
+                    partySize = "2"
+                }
+            }),
+            "matchmaking/leave" => JsonSerializer.SerializeToNode(new
+            {
+                playerId = "player-001",
+                queueName = "default-queue",
+                region = "local-dev",
+                gameMode = "casual-duo",
+                skillBracket = "bronze",
+                reason = "player-requested-leave"
+            }),
+            "matchmaking/update" => JsonSerializer.SerializeToNode(new
+            {
+                playerId = "player-001",
+                queueName = "default-queue",
+                region = "local-dev",
+                gameMode = "casual-duo",
+                skillBracket = "silver",
+                attributes = new
+                {
+                    preferredRole = "tank",
+                    inputType = "keyboard-mouse"
+                },
+                metadata = new
+                {
+                    ticketId = "ticket-1001",
+                    updateSource = "party-lobby"
+                }
+            }),
+            "matchmaking/cancel" => JsonSerializer.SerializeToNode(new
+            {
+                playerId = "player-001",
+                queueName = "default-queue",
+                region = "local-dev",
+                gameMode = "casual-duo",
+                skillBracket = "bronze",
+                reason = "player-cancelled-search"
+            }),
+            _ => null
+        };
+
+        if (example is not null)
+        {
+            mediaType.Example = example;
+        }
+
+        return Task.CompletedTask;
+    });
+});
 builder.Services.Configure<KafkaProducerOptions>(builder.Configuration.GetSection("Kafka"));
 builder.Services.Configure<RedisOptions>(builder.Configuration.GetSection("Redis"));
 builder.Services.AddSingleton<ISystemClock, SystemClock>();
